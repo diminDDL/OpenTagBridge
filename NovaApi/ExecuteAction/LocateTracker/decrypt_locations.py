@@ -5,7 +5,9 @@
 
 import datetime
 import hashlib
+from binascii import unhexlify
 
+from Auth.token_cache import get_cached_value, get_cached_value_or_set
 from FMDNCrypto.foreign_tracker_cryptor import decrypt
 from KeyBackup.cloud_key_decryptor import decrypt_eik, decrypt_aes_gcm
 from NovaApi.ExecuteAction.LocateTracker.decrypted_location import WrappedLocation
@@ -37,18 +39,21 @@ def is_mcu_tracker(device_registration: DeviceRegistration) -> bool:
     return device_registration.fastPairModelId == mcu_fast_pair_model_id
 
 
-def retrieve_identity_key(device_registration: DeviceRegistration) -> bytes:
-    is_mcu = is_mcu_tracker(device_registration)
+def _get_identity_key_cache_name(device_registration: DeviceRegistration, is_mcu: bool) -> str:
     encrypted_user_secrets = device_registration.encryptedUserSecrets
+    cache_source = flip_bits(encrypted_user_secrets.encryptedIdentityKey, is_mcu)
+    cache_hash = hashlib.sha256(cache_source).hexdigest()
+    return f"identity_key_{encrypted_user_secrets.ownerKeyVersion}_{cache_hash}"
 
-    encrypted_identity_key = flip_bits(
-        encrypted_user_secrets.encryptedIdentityKey,
-        is_mcu)
+
+def _retrieve_identity_key(device_registration: DeviceRegistration, is_mcu: bool) -> str:
+    encrypted_user_secrets = device_registration.encryptedUserSecrets
+    encrypted_identity_key = flip_bits(encrypted_user_secrets.encryptedIdentityKey, is_mcu)
     owner_key = get_owner_key()
 
     try:
         identity_key = decrypt_eik(owner_key, encrypted_identity_key)
-        return identity_key
+        return identity_key.hex()
     except Exception as e:
 
         e2eeData = get_eid_info()
@@ -65,6 +70,23 @@ def retrieve_identity_key(device_registration: DeviceRegistration) -> bytes:
         else:
             print(f"Failed to decrypt identity key encrypted with owner key version {encrypted_user_secrets.ownerKeyVersion}, current owner key version is {current_owner_key_version}.\nThis may happen if you reset your end-to-end-encrypted data. To resolve this issue, open the folder 'Auth' and delete the file 'secrets.json'.")
             exit(1)
+
+
+def retrieve_identity_key(device_registration: DeviceRegistration) -> bytes:
+    is_mcu = is_mcu_tracker(device_registration)
+    cache_name = _get_identity_key_cache_name(device_registration, is_mcu)
+
+    cached_identity_key_hex = get_cached_value(cache_name)
+    if cached_identity_key_hex is not None:
+        print(f"[IdentityKeyCache] HIT: {cache_name}")
+        return unhexlify(cached_identity_key_hex)
+
+    print(f"[IdentityKeyCache] MISS: {cache_name}")
+    identity_key_hex = get_cached_value_or_set(
+        cache_name,
+        lambda: _retrieve_identity_key(device_registration, is_mcu)
+    )
+    return unhexlify(identity_key_hex)
 
 
 def decrypt_location_response_locations(device_update_protobuf):
