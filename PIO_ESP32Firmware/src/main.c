@@ -26,7 +26,7 @@
 #endif
 
 // This is the advertisement key / EID. Change it to your own EID.
-const char *eid_string = "INSERT_YOUR_ADVERTISEMENT_KEY_HERE";
+#include "secret.h" // rename the secret-example.h to secret.h and put your EID there
 
 // Find My Device Network (FMDN) advertisement
 // Octet 	Value 	        Description
