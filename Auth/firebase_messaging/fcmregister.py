@@ -79,10 +79,23 @@ class FcmRegisterConfig:
     persistend_ids: list[str] | None = None
     heartbeat_interval_ms: int = 5 * 60 * 1000  # 5 mins
 
-    def __postinit__(self) -> None:
+    android_package: str | None = None
+    android_cert_sha1: str | None = None
+
+    def __post_init__(self) -> None:
         if self.persistend_ids is None:
             self.persistend_ids = []
+        if self.android_cert_sha1 is not None:
+            self.android_cert_sha1 = _normalize_sha1_fingerprint(
+                self.android_cert_sha1
+            )
 
+
+def _normalize_sha1_fingerprint(v: str) -> str:
+    h = v.replace(":", "").replace(" ", "").strip().lower()
+    if len(h) != 40 or any(c not in "0123456789abcdef" for c in h):
+        raise ValueError(f"Invalid SHA-1 fingerprint: {v!r}")
+    return h
 
 class FcmRegister:
     CLIENT_TIMEOUT = ClientTimeout(total=100)
@@ -285,6 +298,14 @@ class FcmRegister:
             _logger.error(errorstr)
         return None
 
+    def _add_android_restriction_headers(self, headers: dict[str, str]) -> None:
+        package_name = self.config.android_package or self.config.bundle_id
+        if package_name:
+            headers["X-Android-Package"] = package_name
+        if self.config.android_cert_sha1:
+            headers["X-Android-Cert"] = self.config.android_cert_sha1
+
+
     async def fcm_install_and_register(
         self, gcm_data: dict[str, Any], keys: dict[str, Any]
     ) -> dict[str, Any] | None:
@@ -309,6 +330,7 @@ class FcmRegister:
             "x-firebase-client": hb_header,
             "x-goog-api-key": self.config.api_key,
         }
+        self._add_android_restriction_headers(headers) 
         payload = {
             "appId": self.config.app_id,
             "authVersion": AUTH_VERSION,
@@ -353,6 +375,7 @@ class FcmRegister:
             "x-firebase-client": hb_header,
             "x-goog-api-key": self.config.api_key,
         }
+        self._add_android_restriction_headers(headers)
         payload = {
             "installation": {
                 "sdkVersion": SDK_VERSION,
@@ -417,6 +440,7 @@ class FcmRegister:
             "x-goog-api-key": self.config.api_key,
             "x-goog-firebase-installations-auth": installation["token"],
         }
+        self._add_android_restriction_headers(headers)
         # If vapid_key is the default do not send it here or it will error
         vapid_key = (
             self.config.vapid_key
