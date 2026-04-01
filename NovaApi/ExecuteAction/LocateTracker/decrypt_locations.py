@@ -6,6 +6,7 @@
 import datetime
 import hashlib
 from binascii import unhexlify
+from math import ceil
 
 from Auth.token_cache import get_cached_value, get_cached_value_or_set
 from FMDNCrypto.foreign_tracker_cryptor import decrypt
@@ -15,7 +16,7 @@ from ProtoDecoders import DeviceUpdate_pb2
 from ProtoDecoders import Common_pb2
 from ProtoDecoders.DeviceUpdate_pb2 import DeviceRegistration
 from ProtoDecoders.decoder import parse_device_update_protobuf
-from SpotApi.CreateBleDevice.config import mcu_fast_pair_model_id
+from SpotApi.CreateBleDevice.config import mcu_fast_pair_model_id, max_truncated_eid_seconds_server
 from SpotApi.CreateBleDevice.util import flip_bits
 from SpotApi.GetEidInfoForE2eeDevices.get_eid_info_request import get_eid_info
 from SpotApi.GetEidInfoForE2eeDevices.get_owner_key import get_owner_key
@@ -89,6 +90,41 @@ def retrieve_identity_key(device_registration: DeviceRegistration) -> bytes:
     return unhexlify(identity_key_hex)
 
 
+def _decrypt_mcu_with_slot_fallback(identity_key: bytes, encrypted_location: bytes, public_key_random: bytes, reported_time_offset: int, pair_date: int) -> tuple[bytes, int, int | None]:
+    # First try the reported counter directly.
+    counters_to_try = [int(reported_time_offset)]
+
+    slot_count = ceil(max_truncated_eid_seconds_server / 1024)
+    for i in range(slot_count):
+        counter_from_pair_date = pair_date + i * 1024
+        counter_offset_only = i * 1024
+        counters_to_try.append(counter_from_pair_date)
+        counters_to_try.append(counter_offset_only)
+
+    seen = set()
+    unique_counters = []
+    for counter in counters_to_try:
+        if counter not in seen:
+            seen.add(counter)
+            unique_counters.append(counter)
+
+    for counter in unique_counters:
+        try:
+            decrypted = decrypt(identity_key, encrypted_location, public_key_random, counter)
+            decoded_slot = None
+            if counter >= pair_date:
+                delta = counter - pair_date
+                if delta % 1024 == 0 and delta >= 0:
+                    decoded_slot = delta // 1024
+
+            return decrypted, counter, decoded_slot
+        except ValueError as e:
+            if str(e) != "MAC check failed":
+                raise
+
+    raise ValueError("MAC check failed")
+
+
 def decrypt_location_response_locations(device_update_protobuf):
 
     device_registration = device_update_protobuf.deviceMetadata.information.deviceRegistration
@@ -132,9 +168,22 @@ def decrypt_location_response_locations(device_update_protobuf):
             if public_key_random == b"":  # Own Report
                 identity_key_hash = hashlib.sha256(identity_key).digest()
                 decrypted_location = decrypt_aes_gcm(identity_key_hash, encrypted_location)
+                decoded_counter = None
+                decoded_slot = None
             else:
-                time_offset = 0 if is_mcu else loc.geoLocation.deviceTimeOffset
-                decrypted_location = decrypt(identity_key, encrypted_location, public_key_random, time_offset)
+                time_offset = loc.geoLocation.deviceTimeOffset
+                if is_mcu:
+                    decrypted_location, decoded_counter, decoded_slot = _decrypt_mcu_with_slot_fallback(
+                        identity_key,
+                        encrypted_location,
+                        public_key_random,
+                        time_offset,
+                        device_registration.pairDate,
+                    )
+                else:
+                    decrypted_location = decrypt(identity_key, encrypted_location, public_key_random, time_offset)
+                    decoded_counter = time_offset
+                    decoded_slot = None
 
             wrapped_location = WrappedLocation(
                 decrypted_location=decrypted_location,
@@ -142,7 +191,9 @@ def decrypt_location_response_locations(device_update_protobuf):
                 accuracy=loc.geoLocation.accuracy,
                 status=loc.status,
                 is_own_report=loc.geoLocation.encryptedReport.isOwnReport,
-                name=""
+                name="",
+                decoded_counter=decoded_counter,
+                decoded_slot=decoded_slot,
             )
             location_time_array.append(wrapped_location)
 
@@ -172,7 +223,15 @@ def decrypt_location_response_locations(device_update_protobuf):
             print(f"Google Maps Link: {create_google_maps_link(latitude, longitude)}")
             
         print(f"Time: {datetime.datetime.fromtimestamp(loc.time).strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"Status: {loc.status}")
+        if loc.decoded_counter is not None:
+            print(f"Decoded Counter: {loc.decoded_counter}")
+        if loc.decoded_slot is not None:
+            print(f"Decoded Timeslot: {loc.decoded_slot}")
+        try:
+            status_name = Common_pb2.Status.Name(loc.status)
+        except ValueError:
+            status_name = "UNKNOWN"
+        print(f"Status: {loc.status} ({status_name})")
         print(f"Is Own Report: {loc.is_own_report}")
         print("-" * 40)
 
