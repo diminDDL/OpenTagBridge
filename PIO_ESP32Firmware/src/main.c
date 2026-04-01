@@ -33,15 +33,30 @@
 
 #include "secret.h"
 
+// Find My Device Network (FMDN) advertisement
+// Octet 	Value 	        Description
+// 0 	    0x02 	        Length
+// 1 	    0x01 	        Flags data type value
+// 2 	    0x06 	        Flags data
+// 3 	    0x18 or 0x19 	Length
+// 4 	    0x16 	        Service data data type value
+// 5 	    0xAA 	        16-bit service UUID
+// 6 	    0xFE 	        16-bit service UUID
+// 7 	    0x40 or 0x41 	FMDN frame type with unwanted tracking protection mode indication
+// 8..27 	Random          20-byte ephemeral identifier
+// 28 		Hashed flags
+
 uint8_t adv_raw_data[31] = {
-    0x02,
-    0x01,
-    0x06,
-    0x19,
-    0x16,
-    0xAA,
-    0xFE,
-    0x41,
+    0x02,   // Length
+    0x01,   // Flags data type value
+    0x06,   // Flags data
+    0x19,   // Length
+    0x16,   // Service data data type value
+    0xAA,   // 16-bit service UUID
+    0xFE,   // 16-bit service UUID
+    0x41,   // FMDN frame type with unwanted tracking protection mode indication
+            // 20-byte ephemeral identifier (inserted below)
+            // Hashed flags (implicitly initialized to 0)
 };
 
 static uint8_t *g_eid_bank = NULL;
