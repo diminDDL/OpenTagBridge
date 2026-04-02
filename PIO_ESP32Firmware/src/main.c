@@ -7,6 +7,7 @@
 #include "nvs_flash.h"
 #include "esp_err.h"
 #include "esp_timer.h"
+#include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -32,6 +33,9 @@
 #endif
 
 #include "secret.h"
+
+// MAC address rotation variable, the MAC address will be derived from the key and thus will appear random
+static esp_bd_addr_t mac_addr = {0xFF, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
 
 // Find My Device Network (FMDN) advertisement
 // Octet 	Value 	        Description
@@ -111,6 +115,28 @@ static bool parse_eid_bank(const char *hex_keys, uint16_t key_count)
     return true;
 }
 
+static void set_mac_address_from_key(uint16_t index)
+{
+    uint8_t *key_ptr = &g_eid_bank[(size_t)index * EID_LEN_BYTES];
+    uint8_t mac_rng[6] = {0};
+    esp_fill_random(mac_rng, sizeof(mac_rng));
+    
+    // Derive MAC address from the first 6 bytes of the key and XOR with random bytes form the HW RNG of the ESP32
+    for (int i = 0; i < 6; i++) {
+        mac_addr[i] = key_ptr[i] ^ mac_rng[i];
+    }
+
+    // static random bits per: https://www.bluetooth.com/wp-content/uploads/Files/Specification/HTML/Core-54/out/en/low-energy-controller/link-layer-specification.html
+    mac_addr[0] = mac_addr[0] | 0b11000000;
+
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+    ble_hs_id_set_pub(mac_addr);
+#elif defined(CONFIG_IDF_TARGET_ESP32)
+    esp_ble_gap_set_device_name("ESP32-FMDN");
+    esp_ble_gap_set_rand_addr(mac_addr);
+#endif
+    ESP_LOGI(TAG, "Set MAC address to %02X:%02X:%02X:%02X:%02X:%02X", mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+}
 
 static void set_advertisement_key_by_index(uint16_t index)
 {
@@ -143,6 +169,7 @@ static void ble_start_advertising(void)
     };
 
     ble_gap_adv_stop();
+    ble_gap_adv_set_addr(mac_addr);
     ble_gap_adv_set_data(adv_raw_data, sizeof(adv_raw_data));
     ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER, &adv_params, ble_advertise_cb, NULL);
 }
@@ -167,18 +194,19 @@ static void on_sync(void)
 
 #if defined(CONFIG_IDF_TARGET_ESP32)
 static esp_ble_adv_params_t g_adv_params = {
-    .adv_int_min = 0x20,
-    .adv_int_max = 0x20,
-    .adv_type = ADV_TYPE_NONCONN_IND,
-    .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
-    .channel_map = ADV_CHNL_ALL,
-    .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
+    .adv_int_min = 0x20,                                    // 20ms
+    .adv_int_max = 0x20,                                    // 20ms
+    .adv_type = ADV_TYPE_NONCONN_IND,                       // Non-connectable undirected advertising
+    .own_addr_type = BLE_ADDR_TYPE_RANDOM,                  // Will be set to the rotated MAC address
+    .channel_map = ADV_CHNL_ALL,                            // Advertise on all channels
+    .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY, // Allow scan and connection requests from any device
 };
 
 
 static void ble_start_advertising(void)
 {
     esp_ble_gap_stop_advertising();
+    ESP_ERROR_CHECK(esp_ble_gap_set_rand_addr(mac_addr));
     ESP_ERROR_CHECK(esp_ble_gap_config_adv_data_raw(adv_raw_data, sizeof(adv_raw_data)));
     ESP_ERROR_CHECK(esp_ble_gap_start_advertising(&g_adv_params));
 }
@@ -196,6 +224,7 @@ static void key_rotation_task(void *param)
 
             if (slot != last_slot) {
                 set_advertisement_key_by_index((uint16_t)slot);
+                set_mac_address_from_key((uint16_t)slot);
                 ble_start_advertising();
                 last_slot = slot;
                 ESP_LOGI(TAG, "Rotated advertisement key to index %d", slot);

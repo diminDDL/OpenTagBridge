@@ -3,6 +3,7 @@
 #  Copyright © 2024 Leon Böttger. All rights reserved.
 #
 
+from selenium.common.exceptions import InvalidSessionIdException, TimeoutException, WebDriverException
 from selenium.webdriver.support.ui import WebDriverWait
 from chrome_driver import create_driver
 
@@ -19,30 +20,54 @@ def request_oauth_account_token_flow():
     # Automatically install and set up the Chrome driver
     print("[AuthFlow] Installing ChromeDriver...")
 
-    driver = create_driver()
+    max_attempts = 2
+    for attempt in range(1, max_attempts + 1):
+        driver = create_driver()
+        try:
+            # Open the browser and navigate to the URL
+            driver.get("https://accounts.google.com/EmbeddedSetup")
 
-    try:
-        # Open the browser and navigate to the URL
-        driver.get("https://accounts.google.com/EmbeddedSetup")
+            # Wait until the "oauth_token" cookie is set
+            print("[AuthFlow] Waiting for 'oauth_token' cookie to be set...")
+            WebDriverWait(driver, 300).until(
+                lambda d: d.get_cookie("oauth_token") is not None
+            )
 
-        # Wait until the "oauth_token" cookie is set
-        print("[AuthFlow] Waiting for 'oauth_token' cookie to be set...")
-        WebDriverWait(driver, 300).until(
-            lambda d: d.get_cookie("oauth_token") is not None
-        )
+            # Get the value of the "oauth_token" cookie
+            oauth_token_cookie = driver.get_cookie("oauth_token")
+            oauth_token_value = oauth_token_cookie['value']
 
-        # Get the value of the "oauth_token" cookie
-        oauth_token_cookie = driver.get_cookie("oauth_token")
-        oauth_token_value = oauth_token_cookie['value']
+            # Print the value of the "oauth_token" cookie
+            print("[AuthFlow] Retrieved Account Token successfully.")
 
-        # Print the value of the "oauth_token" cookie
-        print("[AuthFlow] Retrieved Account Token successfully.")
-
-        return oauth_token_value
-
-    finally:
-        # Close the browser
-        driver.quit()
+            return oauth_token_value
+        except InvalidSessionIdException as exc:
+            if attempt < max_attempts:
+                print(
+                    "[AuthFlow] Chrome session closed unexpectedly. "
+                    "Retrying auth flow..."
+                )
+                continue
+            raise exc
+        except TimeoutException as exc:
+            if attempt < max_attempts:
+                print(
+                    "[AuthFlow] Timed out waiting for the oauth cookie. "
+                    "Retrying auth flow..."
+                )
+                continue
+            raise exc
+        except WebDriverException as exc:
+            if attempt < max_attempts:
+                print(
+                    "[AuthFlow] WebDriver error during auth flow. "
+                    "Retrying auth flow..."
+                )
+                continue
+            raise exc
+        finally:
+            # Close the browser
+            driver.quit()
 
 if __name__ == '__main__':
     request_oauth_account_token_flow()

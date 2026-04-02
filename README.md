@@ -13,7 +13,7 @@ Below are the changes compared to the original repository:
 This repository includes some useful tools that reimplement parts of Google's Find My Device Network (now called Find Hub Network). Note that the code of this repo is still **still** very experimental.
 
 ### What's possible?
-Currently, it is possible to query Find My Device / Find Hub trackers and Android devices, read out their E2EE keys, and decrypt encrypted locations sent from the Find My Device / Find Hub network. You can also send register your own ESP32- or Zephyr-based trackers, as described below.
+Currently, it is possible to query Find My Device / Find Hub trackers and Android devices, read out their E2EE keys, and decrypt encrypted locations sent from the Find My Device / Find Hub network. You can also send register your own ESP32- trackers, as described below.
 
 ### How to use
 
@@ -43,19 +43,11 @@ The authentication results are stored in `Auth/secrets.json`. If you intend to r
 - No support for trackers using the P-256 curve and 32-Byte advertisements. Regular trackers don't seem to use this curve at all - it is only confirmed that it is used with Sony's WH1000XM5 headphones.
 - No support for the authentication process on ARM Linux
 - If you receive "ssl.SSLCertVerificationError" when running the script, try to follow [this answer](https://stackoverflow.com/a/53310545).
-- Please also consider the issues listed in the [README in the ESP32Firmware folder](ESP32Firmware/README.md) if you want to register custom trackers.
+- Please also consider the issues listed in the [README in the ESP32Firmware folder](PIO_ESP32Firmware/README.md) if you want to register custom trackers.
 
 ### Firmware for custom ESP32-based trackers
-~~If you want to use an ESP32 as a custom Find My Device tracker, you can find the firmware in the folder ESP32Firmware. To register a new tracker, run main.py and press 'r' if you are asked to. Afterward, follow the instructions on-screen.~~
+For more information, check the [README in the PIO_ESP32Firmware folder](PIO_ESP32Firmware/README.md).
 
-~~For more information, check the [README in the ESP32Firmware folder](ESP32Firmware/README.md).~~
-
-Better firmware with key rotation is WIP, you can see the current and try using it in [PIO_ESP32Firmware](PIO_ESP32Firmware/)
-
-### Firmware for custom Zephyr-based trackers
-If you want to use a Zephyr-supported BLE device (e.g. nRF51/52) as a custom Find My Device tracker, you can find the firmware in the folder ZephyrFirmware. To register a new tracker, run main.py and press 'r' if you are asked to. Afterward, follow the instructions on-screen.
-
-For more information, check the [README in the ZephyrFirmware folder](ZephyrFirmware/README.md).
 
 ### iOS App
 ~~You can also use this [iOS App](https://testflight.apple.com/join/rGqa2mTe) to access your Find My Device trackers on the go.~~

@@ -110,7 +110,7 @@ def register_esp32():
     spot_request("CreateBleDevice", bytes_data)
 
     print(f"Registered device successfully. Generated {key_count} rotating advertisement keys.")
-    print("Afterward, go to the folder 'GoogleFindMyTools/ESP32Firmware' or 'GoogleFindMyTools/ZephyrFirmware' and follow the instructions in the README.md file.")
+    print("Afterward, go to the folder 'PIO_ESP32Firmware' and follow the instructions in the README.md file.")
 
     print("\nFirst rotating key (for reference):")
     print("+" + "-" * 78 + "+")
