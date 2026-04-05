@@ -189,3 +189,4 @@ venv/
 
 # Binary files
 *.bin
+*.log

@@ -40,7 +40,7 @@ def create_device_list_request():
     return hex_payload
 
 
-def list_devices():
+def list_devices(canonic_id=None):
     print("Loading...")
     result_hex = request_device_list()
 
@@ -58,6 +58,17 @@ def list_devices():
 
     for idx, (device_name, canonic_id) in enumerate(canonic_ids, start=1):
         print(f"{idx}. {device_name}: {canonic_id}")
+
+    if canonic_id:
+        selected_canonic_id = canonic_id
+        selected_device_name = "Unknown"
+        for device_name, current_canonic_id in canonic_ids:
+            if current_canonic_id == selected_canonic_id:
+                selected_device_name = device_name
+                break
+
+        get_location_data_for_device(selected_canonic_id, selected_device_name)
+        return
 
     selected_value = input("\nIf you want to see locations of a tracker, type the number of the tracker and press 'Enter'.\nIf you want to register a new MCU-based tracker, type 'r' and press 'Enter': ")
 
