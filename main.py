@@ -17,4 +17,4 @@ if __name__ == '__main__':
     )
     args = parser.parse_args()
 
-    list_devices(canonic_id=args.canonic_id)
+    list_devices(target_canonic_id=args.canonic_id)
