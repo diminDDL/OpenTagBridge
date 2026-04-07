@@ -190,3 +190,6 @@ venv/
 # Binary files
 *.bin
 *.log
+
+# IDE
+.vscode

@@ -10,9 +10,21 @@ from ProtoDecoders.DeviceUpdate_pb2 import DevicesList, UploadPrecomputedPublicK
 from SpotApi.CreateBleDevice.config import max_truncated_eid_seconds_server
 from SpotApi.CreateBleDevice.util import hours_to_seconds
 from SpotApi.spot_request import spot_request
+from Auth.token_cache import get_cached_value, set_cached_value
 
 
-def refresh_custom_trackers(device_list: DevicesList):
+LAST_UPLOAD_TIMESTAMP_KEY = "upload_precomputed_public_key_ids_last_updated"
+UPLOAD_TTL_SECONDS = 24 * 60 * 60
+
+
+def refresh_custom_trackers(device_list: DevicesList, force_upload: bool = False):
+
+    if not force_upload and _is_recent_upload():
+        print(
+            "[UploadPrecomputedPublicKeyIds] Skipping refresh; last update was less "
+            "than 24 hours ago. Use --force-upload-keys to override."
+        )
+        return
 
     request = UploadPrecomputedPublicKeyIdsRequest()
     needs_upload = False
@@ -41,6 +53,7 @@ def refresh_custom_trackers(device_list: DevicesList):
         try:
             bytes_data = request.SerializeToString()
             spot_request("UploadPrecomputedPublicKeyIds", bytes_data)
+            _set_last_upload_timestamp()
         except Exception as e:
             print(f"[UploadPrecomputedPublicKeyIds] Failed to refresh custom trackers. Please file a bug report. Continuing... {str(e)}")
 
@@ -65,3 +78,18 @@ def get_next_eids(eik: bytes, pair_date: int, start_date: int, duration_seconds:
         current_time_offset += 1024
 
     return public_key_id_list
+
+
+def _is_recent_upload() -> bool:
+    last_upload = get_cached_value(LAST_UPLOAD_TIMESTAMP_KEY)
+    if last_upload is None:
+        return False
+    try:
+        last_upload = int(last_upload)
+    except (TypeError, ValueError):
+        return False
+    return (int(time.time()) - last_upload) < UPLOAD_TTL_SECONDS
+
+
+def _set_last_upload_timestamp() -> None:
+    set_cached_value(LAST_UPLOAD_TIMESTAMP_KEY, int(time.time()))

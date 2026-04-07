@@ -15,6 +15,15 @@ if __name__ == '__main__':
         dest="canonic_id",
         help="Query a specific tracker by canonic ID and skip the interactive prompt.",
     )
+    parser.add_argument(
+        "--force-upload-keys",
+        dest="force_upload_keys",
+        action="store_true",
+        help="Force UploadPrecomputedPublicKeyIds even if a recent upload was recorded.",
+    )
     args = parser.parse_args()
 
-    list_devices(target_canonic_id=args.canonic_id)
+    list_devices(
+        target_canonic_id=args.canonic_id,
+        force_upload_keys=args.force_upload_keys,
+    )

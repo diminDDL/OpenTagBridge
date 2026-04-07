@@ -40,13 +40,13 @@ def create_device_list_request():
     return hex_payload
 
 
-def list_devices(target_canonic_id=None):
+def list_devices(target_canonic_id=None, force_upload_keys: bool = False):
     print("Loading...")
     result_hex = request_device_list()
 
     device_list = parse_device_list_protobuf(result_hex)
 
-    refresh_custom_trackers(device_list)
+    refresh_custom_trackers(device_list, force_upload=force_upload_keys)
     canonic_ids = get_canonic_ids(device_list)
 
     print("")
