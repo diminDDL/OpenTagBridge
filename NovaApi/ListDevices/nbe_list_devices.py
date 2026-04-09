@@ -4,12 +4,12 @@
 #
 
 import binascii
-from NovaApi.ExecuteAction.LocateTracker.location_request import get_location_data_for_device
+from NovaApi.ExecuteAction.LocateTracker.location_request import get_location_data_for_device, get_location_data_for_compound
 from NovaApi.nova_request import nova_request
 from NovaApi.scopes import NOVA_LIST_DEVICS_API_SCOPE
 from NovaApi.util import generate_random_uuid
 from ProtoDecoders import DeviceUpdate_pb2
-from ProtoDecoders.decoder import parse_device_list_protobuf, get_canonic_ids
+from ProtoDecoders.decoder import parse_device_list_protobuf, get_canonic_ids, get_grouped_menu_entries
 from SpotApi.CreateBleDevice.create_ble_device import register_esp32
 from SpotApi.UploadPrecomputedPublicKeyIds.upload_precomputed_public_key_ids import refresh_custom_trackers
 
@@ -48,6 +48,7 @@ def list_devices(target_canonic_id=None, force_upload_keys: bool = False):
 
     refresh_custom_trackers(device_list, force_upload=force_upload_keys)
     canonic_ids = get_canonic_ids(device_list)
+    grouped_entries = get_grouped_menu_entries(device_list)
 
     print("")
     print("-" * 50)
@@ -56,8 +57,11 @@ def list_devices(target_canonic_id=None, force_upload_keys: bool = False):
     print("")
     print("The following trackers are available:")
 
-    for idx, (device_name, device_canonic_id) in enumerate(canonic_ids, start=1):
-        print(f"{idx}. {device_name}: {device_canonic_id}")
+    for idx, entry in enumerate(grouped_entries, start=1):
+        if entry["type"] == "compound":
+            print(f"{idx}. {entry['display_name']} [compound: {len(entry['subtags'])} subtags]")
+        else:
+            print(f"{idx}. {entry['display_name']}: {entry['canonic_id']}")
 
     if target_canonic_id:
         selected_canonic_id = target_canonic_id
@@ -77,10 +81,12 @@ def list_devices(target_canonic_id=None, force_upload_keys: bool = False):
         register_esp32()
     else:
         selected_idx = int(selected_value) - 1
-        selected_device_name = canonic_ids[selected_idx][0]
-        selected_canonic_id = canonic_ids[selected_idx][1]
+        selected_entry = grouped_entries[selected_idx]
 
-        get_location_data_for_device(selected_canonic_id, selected_device_name)
+        if selected_entry["type"] == "compound":
+            get_location_data_for_compound(selected_entry["display_name"], selected_entry["subtags"])
+        else:
+            get_location_data_for_device(selected_entry["canonic_id"], selected_entry["display_name"])
 
 
 if __name__ == '__main__':

@@ -5,10 +5,12 @@
 
 import datetime
 import hashlib
+import re
 from binascii import unhexlify
 from math import ceil
 
-from Auth.token_cache import get_cached_value, get_cached_value_or_set
+from Auth.token_cache import get_cached_value, get_cached_value_or_set, get_cached_json_value
+from FMDNCrypto.eid_generator import ROTATION_PERIOD
 from FMDNCrypto.foreign_tracker_cryptor import decrypt
 from KeyBackup.cloud_key_decryptor import decrypt_eik, decrypt_aes_gcm
 from NovaApi.ExecuteAction.LocateTracker.decrypted_location import WrappedLocation
@@ -16,7 +18,12 @@ from ProtoDecoders import DeviceUpdate_pb2
 from ProtoDecoders import Common_pb2
 from ProtoDecoders.DeviceUpdate_pb2 import DeviceRegistration
 from ProtoDecoders.decoder import parse_device_update_protobuf
-from SpotApi.CreateBleDevice.config import mcu_fast_pair_model_id, max_truncated_eid_seconds_server
+from SpotApi.CreateBleDevice.config import (
+    mcu_fast_pair_model_id,
+    max_truncated_eid_seconds_server,
+    TRACKER_SLOT_WINDOW_SIZE,
+    TRACKER_WINDOW_SIZES_CACHE_KEY,
+)
 from SpotApi.CreateBleDevice.util import flip_bits
 from SpotApi.GetEidInfoForE2eeDevices.get_eid_info_request import get_eid_info
 from SpotApi.GetEidInfoForE2eeDevices.get_owner_key import get_owner_key
@@ -90,14 +97,36 @@ def retrieve_identity_key(device_registration: DeviceRegistration) -> bytes:
     return unhexlify(identity_key_hex)
 
 
+def _resolve_tracker_window_size(device_name: str) -> int:
+    legacy_slot_count = ceil(max_truncated_eid_seconds_server / ROTATION_PERIOD)
+
+    tracker_window_sizes = get_cached_json_value(TRACKER_WINDOW_SIZES_CACHE_KEY, default={})
+    if isinstance(tracker_window_sizes, dict):
+        value = tracker_window_sizes.get(device_name)
+        try:
+            if value is not None:
+                parsed = int(value)
+                if parsed > 0:
+                    return parsed
+        except (TypeError, ValueError):
+            pass
+
+    # If cache was lost but the tracker follows compound naming, keep wrapped behavior.
+    if re.match(r"^\[OTB-C\] .+_[0-9]+$", device_name):
+        return TRACKER_SLOT_WINDOW_SIZE
+
+    # Legacy trackers should keep legacy horizon sizing.
+    return legacy_slot_count
+
+
 def _decrypt_mcu_with_slot_fallback(identity_key: bytes, encrypted_location: bytes, public_key_random: bytes, reported_time_offset: int, pair_date: int) -> tuple[bytes, int, int | None]:
     # First try the reported counter directly.
     counters_to_try = [int(reported_time_offset)]
 
-    slot_count = ceil(max_truncated_eid_seconds_server / 1024)
+    slot_count = ceil(max_truncated_eid_seconds_server / ROTATION_PERIOD)
     for i in range(slot_count):
-        counter_from_pair_date = pair_date + i * 1024
-        counter_offset_only = i * 1024
+        counter_from_pair_date = pair_date + i * ROTATION_PERIOD
+        counter_offset_only = i * ROTATION_PERIOD
         counters_to_try.append(counter_from_pair_date)
         counters_to_try.append(counter_offset_only)
 
@@ -114,8 +143,8 @@ def _decrypt_mcu_with_slot_fallback(identity_key: bytes, encrypted_location: byt
             decoded_slot = None
             if counter >= pair_date:
                 delta = counter - pair_date
-                if delta % 1024 == 0 and delta >= 0:
-                    decoded_slot = delta // 1024
+                if delta % ROTATION_PERIOD == 0 and delta >= 0:
+                    decoded_slot = (delta // ROTATION_PERIOD) % slot_count
 
             return decrypted, counter, decoded_slot
         except ValueError as e:
@@ -125,9 +154,58 @@ def _decrypt_mcu_with_slot_fallback(identity_key: bytes, encrypted_location: byt
     raise ValueError("MAC check failed")
 
 
-def decrypt_location_response_locations(device_update_protobuf):
+def decrypt_location_response_locations_to_entries(device_update_protobuf) -> list[dict]:
+
+    location_time_array = _collect_wrapped_locations(device_update_protobuf)
+
+    entries = []
+    for loc in location_time_array:
+        try:
+            status_name = Common_pb2.Status.Name(loc.status)
+        except ValueError:
+            status_name = "UNKNOWN"
+
+        if loc.status == Common_pb2.Status.SEMANTIC:
+            entries.append({
+                "kind": "semantic",
+                "name": loc.name,
+                "time": loc.time,
+                "status": loc.status,
+                "status_name": status_name,
+                "is_own_report": loc.is_own_report,
+                "decoded_counter": loc.decoded_counter,
+                "decoded_slot": loc.decoded_slot,
+            })
+            continue
+
+        proto_loc = DeviceUpdate_pb2.Location()
+        proto_loc.ParseFromString(loc.decrypted_location)
+
+        latitude = proto_loc.latitude / 1e7
+        longitude = proto_loc.longitude / 1e7
+        altitude = proto_loc.altitude
+
+        entries.append({
+            "kind": "geo",
+            "latitude": latitude,
+            "longitude": longitude,
+            "altitude": altitude,
+            "maps_link": create_google_maps_link(latitude, longitude),
+            "time": loc.time,
+            "status": loc.status,
+            "status_name": status_name,
+            "is_own_report": loc.is_own_report,
+            "decoded_counter": loc.decoded_counter,
+            "decoded_slot": loc.decoded_slot,
+        })
+
+    return entries
+
+
+def _collect_wrapped_locations(device_update_protobuf) -> list[WrappedLocation]:
 
     device_registration = device_update_protobuf.deviceMetadata.information.deviceRegistration
+    window_size = _resolve_tracker_window_size(device_update_protobuf.deviceMetadata.userDefinedDeviceName)
 
     identity_key = retrieve_identity_key(device_registration)
     locations_proto = device_update_protobuf.deviceMetadata.information.locationInformation.reports.recentLocationAndNetworkLocations
@@ -180,6 +258,8 @@ def decrypt_location_response_locations(device_update_protobuf):
                         time_offset,
                         device_registration.pairDate,
                     )
+                    if decoded_slot is not None:
+                        decoded_slot = decoded_slot % window_size
                 else:
                     decrypted_location = decrypt(identity_key, encrypted_location, public_key_random, time_offset)
                     decoded_counter = time_offset
@@ -197,45 +277,39 @@ def decrypt_location_response_locations(device_update_protobuf):
             )
             location_time_array.append(wrapped_location)
 
+    return location_time_array
+
+
+def decrypt_location_response_locations(device_update_protobuf):
+
+    entries = decrypt_location_response_locations_to_entries(device_update_protobuf)
+
     print("-" * 40)
     print("[DecryptLocations] Decrypted Locations:")
 
-    if not location_time_array:
+    if not entries:
         print("No locations found.")
         return
 
-    for loc in location_time_array:
+    for entry in entries:
 
-        if loc.status == Common_pb2.Status.SEMANTIC:
-            print(f"Semantic Location: {loc.name}")
+        if entry["kind"] == "semantic":
+            print(f"Semantic Location: {entry['name']}")
 
         else:
-            proto_loc = DeviceUpdate_pb2.Location()
-            proto_loc.ParseFromString(loc.decrypted_location)
-
-            latitude = proto_loc.latitude / 1e7
-            longitude = proto_loc.longitude / 1e7
-            altitude = proto_loc.altitude
-
-            print(f"Latitude: {latitude}")
-            print(f"Longitude: {longitude}")
-            print(f"Altitude: {altitude}")
-            print(f"Google Maps Link: {create_google_maps_link(latitude, longitude)}")
+            print(f"Latitude: {entry['latitude']}")
+            print(f"Longitude: {entry['longitude']}")
+            print(f"Altitude: {entry['altitude']}")
+            print(f"Google Maps Link: {entry['maps_link']}")
             
-        print(f"Time: {datetime.datetime.fromtimestamp(loc.time).strftime('%Y-%m-%d %H:%M:%S')}")
-        if loc.decoded_counter is not None:
-            print(f"Decoded Counter: {loc.decoded_counter}")
-        if loc.decoded_slot is not None:
-            print(f"Decoded Timeslot: {loc.decoded_slot}")
-        try:
-            status_name = Common_pb2.Status.Name(loc.status)
-        except ValueError:
-            status_name = "UNKNOWN"
-        print(f"Status: {loc.status} ({status_name})")
-        print(f"Is Own Report: {loc.is_own_report}")
+        print(f"Time: {datetime.datetime.fromtimestamp(entry['time']).strftime('%Y-%m-%d %H:%M:%S')}")
+        if entry["decoded_counter"] is not None:
+            print(f"Decoded Counter: {entry['decoded_counter']}")
+        if entry["decoded_slot"] is not None:
+            print(f"Decoded Timeslot: {entry['decoded_slot']}")
+        print(f"Status: {entry['status']} ({entry['status_name']})")
+        print(f"Is Own Report: {entry['is_own_report']}")
         print("-" * 40)
-
-    pass
 
 
 if __name__ == '__main__':

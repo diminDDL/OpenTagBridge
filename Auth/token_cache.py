@@ -27,12 +27,32 @@ def get_cached_value(name: str):
         with open(secrets_file, 'r') as file:
             try:
                 data = json.load(file)
-                value = data.get(name)
-                if value:
-                    return value
+                if name in data:
+                    return data.get(name)
             except json.JSONDecodeError:
                 return None
     return None
+
+
+def get_cached_json_value(name: str, default=None):
+    value = get_cached_value(name)
+    if value is None:
+        return default
+
+    if isinstance(value, (dict, list)):
+        return value
+
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return default
+
+    return default
+
+
+def set_cached_json_value(name: str, value):
+    set_cached_value(name, json.dumps(value))
 
 
 def set_cached_value(name: str, value: str):

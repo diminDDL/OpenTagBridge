@@ -216,17 +216,25 @@ static void ble_start_advertising(void)
 static void key_rotation_task(void *param)
 {
     int last_slot = -1;
-
+    static uint64_t last_slot_change_time = 0;
+    int slot = (int)(esp_random() % g_eid_key_count);;
     while (true) {
         if (g_ble_ready && g_eid_key_count > 0) {
             uint64_t now_seconds = esp_timer_get_time() / 1000000ULL;
-            int slot = (int)((now_seconds / ROTATION_PERIOD_SECONDS) % g_eid_key_count);
-
+            // set a timed slot
+            // int slot = (int)((now_seconds / ROTATION_PERIOD_SECONDS) % g_eid_key_count);
+            
+            // set a random slot
+            if(now_seconds - last_slot_change_time > ROTATION_PERIOD_SECONDS) {
+                slot = (int)(esp_random() % g_eid_key_count);
+            }
+            
             if (slot != last_slot) {
                 set_advertisement_key_by_index((uint16_t)slot);
                 set_mac_address_from_key((uint16_t)slot);
                 ble_start_advertising();
                 last_slot = slot;
+                last_slot_change_time = now_seconds;
                 ESP_LOGI(TAG, "Rotated advertisement key to index %d", slot);
             }
         }
