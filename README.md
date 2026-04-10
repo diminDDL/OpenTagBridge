@@ -53,3 +53,9 @@ For more information, check the [README in the PIO_ESP32Firmware folder](PIO_ESP
 ~~You can also use this [iOS App](https://testflight.apple.com/join/rGqa2mTe) to access your Find My Device trackers on the go.~~
 
 Doesn't work with the key rotation implemented here.
+
+# Disclaimer
+> [!CAUTION]
+> This project is provided for educational and research purposes only. The authors and contributors disclaim liability and do not condone illegal, unauthorized, or unethical use, including unauthorized tracking or invasions of privacy.
+> 
+> Use of this project is entirely at your own risk. Interacting with Google location networks in undocumented or unsupported ways may violate platform rules or terms of service and may result in account penalties, service restrictions, or other consequences. The authors and contributors disclaim liability for misuse of this repository and for any damages or consequences resulting from its use.

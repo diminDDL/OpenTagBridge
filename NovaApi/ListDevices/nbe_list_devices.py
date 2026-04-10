@@ -40,7 +40,11 @@ def create_device_list_request():
     return hex_payload
 
 
-def list_devices(target_canonic_id=None, force_upload_keys: bool = False):
+def list_devices(
+    target_canonic_id=None,
+    force_upload_keys: bool = False,
+    allow_device_registration: bool = False,
+):
     print("Loading...")
     result_hex = request_device_list()
 
@@ -74,19 +78,51 @@ def list_devices(target_canonic_id=None, force_upload_keys: bool = False):
         get_location_data_for_device(selected_canonic_id, selected_device_name)
         return
 
-    selected_value = input("\nIf you want to see locations of a tracker, type the number of the tracker and press 'Enter'.\nIf you want to register a new MCU-based tracker, type 'r' and press 'Enter': ")
+    if allow_device_registration:
+        print("\n" + "!" * 70)
+        print("WARNING: STALKING / TRACKING PEOPLE WITHOUT CONSENT IS HARMFUL")
+        print("!" * 70)
+        print(
+            "This tool can register new trackers. Using trackers to follow or harass someone\n"
+            "without their clear, informed consent is unethical and may be illegal.\n\n"
+            "The developers of this tool do not condone stalking. Only use this for legitimate,\n"
+            "research and educational purposes."
+        )
+        print("!" * 70)
 
-    if selected_value == 'r':
-        print("Loading...")
-        register_esp32()
-    else:
-        selected_idx = int(selected_value) - 1
+    prompt_lines = [
+        "\nIf you want to see locations of a tracker, type the number of the tracker and press 'Enter'."
+    ]
+    if allow_device_registration:
+        prompt_lines.append(
+            "If you want to register a new MCU-based tracker, type 'r' and press 'Enter'."
+        )
+    prompt = "\n".join(prompt_lines) + ": "
+
+    while True:
+        selected_value = input(prompt).strip()
+
+        if allow_device_registration and selected_value.lower() == 'r':
+            print("Loading...")
+            register_esp32()
+            return
+
+        try:
+            selected_idx = int(selected_value) - 1
+        except ValueError:
+            print("Invalid input. Please enter a tracker number" + (" or 'r'." if allow_device_registration else "."))
+            continue
+
+        if not (0 <= selected_idx < len(grouped_entries)):
+            print(f"Invalid tracker number. Please enter a number between 1 and {len(grouped_entries)}.")
+            continue
+
         selected_entry = grouped_entries[selected_idx]
-
         if selected_entry["type"] == "compound":
             get_location_data_for_compound(selected_entry["display_name"], selected_entry["subtags"])
         else:
             get_location_data_for_device(selected_entry["canonic_id"], selected_entry["display_name"])
+        return
 
 
 if __name__ == '__main__':
