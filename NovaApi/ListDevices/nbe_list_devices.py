@@ -8,10 +8,14 @@ from NovaApi.ExecuteAction.LocateTracker.location_request import get_location_da
 from NovaApi.nova_request import nova_request
 from NovaApi.scopes import NOVA_LIST_DEVICS_API_SCOPE
 from NovaApi.util import generate_random_uuid
+from Auth.token_cache import get_cached_json_value, set_cached_json_value
 from ProtoDecoders import DeviceUpdate_pb2
 from ProtoDecoders.decoder import parse_device_list_protobuf, get_canonic_ids, get_grouped_menu_entries
 from SpotApi.CreateBleDevice.create_ble_device import register_esp32
 from SpotApi.UploadPrecomputedPublicKeyIds.upload_precomputed_public_key_ids import refresh_custom_trackers
+
+
+CANONIC_IDS_CACHE_KEY = "canonic_ids_v1"
 
 
 def request_device_list():
@@ -40,6 +44,41 @@ def create_device_list_request():
     return hex_payload
 
 
+def _extract_device_canonic_ids(device):
+    if device.identifierInformation.type == DeviceUpdate_pb2.IDENTIFIER_ANDROID:
+        canonic_ids = device.identifierInformation.phoneInformation.canonicIds.canonicId
+    else:
+        canonic_ids = device.identifierInformation.canonicIds.canonicId
+    return [canonic_id.id for canonic_id in canonic_ids if canonic_id.id]
+
+
+def _cache_canonic_ids_from_device_list(device_list) -> None:
+    existing_cache = get_cached_json_value(CANONIC_IDS_CACHE_KEY, default={})
+    if not isinstance(existing_cache, dict):
+        existing_cache = {}
+
+    existing_entries = existing_cache.get("entries", [])
+    if not isinstance(existing_entries, list):
+        existing_entries = []
+
+    by_id = {
+        entry.get("canonic_id"): entry
+        for entry in existing_entries
+        if isinstance(entry, dict) and isinstance(entry.get("canonic_id"), str)
+    }
+
+    for device in device_list.deviceMetadata:
+        device_name = device.userDefinedDeviceName or "Unknown"
+        for canonic_id in _extract_device_canonic_ids(device):
+            current = by_id.get(canonic_id, {})
+            current["canonic_id"] = canonic_id
+            current["name"] = device_name
+            by_id[canonic_id] = current
+
+    merged_entries = sorted(by_id.values(), key=lambda item: item.get("name", ""))
+    set_cached_json_value(CANONIC_IDS_CACHE_KEY, {"entries": merged_entries})
+
+
 def list_devices(
     target_canonic_id=None,
     force_upload_keys: bool = False,
@@ -49,6 +88,7 @@ def list_devices(
     result_hex = request_device_list()
 
     device_list = parse_device_list_protobuf(result_hex)
+    _cache_canonic_ids_from_device_list(device_list)
 
     refresh_custom_trackers(device_list, force_upload=force_upload_keys)
     canonic_ids = get_canonic_ids(device_list)
