@@ -240,6 +240,7 @@ message ExecuteActionLocateTrackerType {
 }
 
 enum SpotContributorType {
+    FMDN_DISABLED_DEFAULT = 0;
     FMDN_ALL_LOCATIONS = 2;
 }
 
@@ -357,11 +358,6 @@ message UploadPrecomputedPublicKeyIdsRequest {
         PublicKeyIdList clientList = 2;
         int32 pairDate = 3;
     }
-}
-
-message Time {
-    uint32 seconds = 1;
-    uint32 nanos = 2;
 }
 
 message Location {
