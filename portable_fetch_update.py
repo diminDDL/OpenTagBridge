@@ -31,6 +31,7 @@ import base64
 import datetime
 import hashlib
 import importlib
+import inspect
 import json
 import os
 import re
@@ -966,16 +967,40 @@ class PortableFcmReceiver:
         self._loop = None
         self._loop_thread = None
 
-        fcm_config = fcm_register_config_cls(
-            project_id="google.com:api-project-289722593072",
-            app_id="1:289722593072:android:3cfcf5bc359f0308",
-            api_key="AIzaSyD_gko3P392v6how2H7UpdeXQ0v2HLettc",
-            messaging_sender_id="289722593072",
-            bundle_id="com.google.android.apps.adm",
-            android_package="com.google.android.apps.adm",
-            android_cert_sha1="38918a453d07199354f8b19af05ec6562ced5788",
-        )
-        self.pc = fcm_push_client_cls(self._on_notification, fcm_config, self.credentials, self._on_credentials_updated)
+        base_config_kwargs = {
+            "project_id": "google.com:api-project-289722593072",
+            "app_id": "1:289722593072:android:3cfcf5bc359f0308",
+            "api_key": "AIzaSyD_gko3P392v6how2H7UpdeXQ0v2HLettc",
+            "messaging_sender_id": "289722593072",
+            "bundle_id": "com.google.android.apps.adm",
+            "android_package": "com.google.android.apps.adm",
+            "android_cert_sha1": "38918a453d07199354f8b19af05ec6562ced5788",
+        }
+
+        # Some firebase_messaging builds expose different constructor signatures.
+        cfg_sig = inspect.signature(fcm_register_config_cls)
+        cfg_kwargs = {
+            key: value
+            for key, value in base_config_kwargs.items()
+            if key in cfg_sig.parameters
+        }
+        fcm_config = fcm_register_config_cls(**cfg_kwargs)
+
+        push_sig = inspect.signature(fcm_push_client_cls)
+        if "credentials_updated_callback" in push_sig.parameters:
+            self.pc = fcm_push_client_cls(
+                self._on_notification,
+                fcm_config,
+                self.credentials,
+                credentials_updated_callback=self._on_credentials_updated,
+            )
+        else:
+            self.pc = fcm_push_client_cls(
+                self._on_notification,
+                fcm_config,
+                self.credentials,
+                self._on_credentials_updated,
+            )
 
     def _on_credentials_updated(self, creds: dict) -> None:
         self.credentials = creds
