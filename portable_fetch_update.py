@@ -57,10 +57,10 @@ FcmRegisterConfig = None
 protoc = None
 
 
-def _load_runtime_dependencies(*, need_protoc: bool = False) -> None:
+def _load_runtime_dependencies(*, need_protoc: bool = False, need_fcm: bool = False) -> None:
     global FcmPushClient, FcmRegisterConfig, protoc
 
-    if FcmPushClient is None or FcmRegisterConfig is None:
+    if need_fcm and (FcmPushClient is None or FcmRegisterConfig is None):
         import_errors = []
         for module_name in ("firebase_messaging", "Auth.firebase_messaging"):
             try:
@@ -955,7 +955,7 @@ def _cached_identity_key(auth_data: dict, device_registration) -> bytes:
 
 class PortableFcmReceiver:
     def __init__(self, auth_data: dict, auth_file: Path) -> None:
-        _load_runtime_dependencies()
+        _load_runtime_dependencies(need_fcm=True)
         if FcmPushClient is None or FcmRegisterConfig is None:
             raise RuntimeError("Missing dependency: firebase-messaging")
 
